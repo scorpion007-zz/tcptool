@@ -1,0 +1,5 @@
+.vs/
+*.filters
+x64/
+build/
+deploy/
