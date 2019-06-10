@@ -8,6 +8,9 @@
 #include <ws2tcpip.h>
 #include <stdio.h>
 #include <stdarg.h>
+#include <windows.h>
+#include <assert.h>
+#include <strsafe.h>
 
 #define VER_MAJ 1
 #define VER_MIN 0
@@ -17,6 +20,25 @@
 #else
 #define DBGPRINT
 #endif
+
+#define STRING_AND_CCH(x) x, _countof(x)
+
+static const int x_MaxAddr = 128;
+
+// Options.
+//
+struct TcpToolOpts
+{
+	// Connect address -- for clients.
+	//
+	WCHAR ConnectAddr[x_MaxAddr];
+
+	// Only applicable for server.
+	//
+	short ListenPort;
+};
+
+TcpToolOpts g_Opts;
 
 void
 PrintError(const WCHAR *fmt, ...) {
@@ -112,9 +134,141 @@ exit:
 	return err;
 }
 
-int main()
+// TODO: factor out to common lib.
+//
+enum ArgType
+{
+	Arg_None,
+	Arg_String,
+	Arg_Int,
+	Arg_Int64,
+	
+	// Add before this.
+	//
+	Arg_Last
+};
+
+struct ArgVal
+{
+	ArgType Type;
+	union
+	{
+		PCWSTR StrVal;
+		int IntVal;
+		INT64 Int64Val;
+	};
+};
+
+typedef _Check_return_ HRESULT (*ArgHdl)(_In_ const ArgVal* val);
+
+struct Arg
+{
+	PCWSTR Name;
+	PCWSTR ShortName;
+	ArgType Type;
+	ArgHdl Callback;
+};
+
+// Handle -connect.
+//
+static _Check_return_ HRESULT
+hdlConnect(_In_ const ArgVal* val)
+{
+	StringCchCopy(STRING_AND_CCH(g_Opts.ConnectAddr), val->StrVal);
+	return S_OK;
+}
+
+static const Arg x_Args[] =
+{
+	{L"connect", L"c", Arg_String, hdlConnect},
+};
+
+_Check_return_ HRESULT
+ProcessCommandLine(int argc, WCHAR** argv)
+{
+	HRESULT hr = S_OK;
+	
+	for (int i = 0; i < argc; ++i)
+	{
+		if (argv[i][0] == L'/' || argv[i][0] == L'-')
+		{
+			PCWSTR arg = argv[i]+1;
+			// Look for matching arg.
+			//
+			for (int iArg = 0; iArg < _countof(x_Args); ++iArg)
+			{
+				if (!wcscmp(x_Args[iArg].Name, arg) || !wcscmp(x_Args[iArg].ShortName, arg))
+				{
+					PCWSTR wszArgVal = nullptr;
+					ArgVal argVal;
+					int cConv = 0;
+					
+					// Parse the val if necessary.
+					//
+					if (x_Args[iArg].Type != Arg_None)
+					{
+						if (i + 1 >= argc)
+						{
+							// Not enough args.
+							//
+							PrintError(L"arg '%s' requires param", arg);
+							hr = E_INVALIDARG;
+							goto exit;
+						}
+
+						// Consume one arg.
+						//
+						wszArgVal = argv[++i];
+					}
+					
+					argVal.Type = x_Args[iArg].Type;
+					
+					switch (x_Args[iArg].Type)
+					{
+					case Arg_String:
+						argVal.StrVal = wszArgVal;
+						break;
+					case Arg_Int:
+						cConv = swscanf_s(wszArgVal, L"%i", &argVal.IntVal);
+						if (cConv != 1)
+						{
+							PrintError(L"arg '%s' requires int. Got %s", wszArgVal);
+							hr = E_INVALIDARG;
+							goto exit;
+						}
+						break;
+					case Arg_Int64:
+						cConv = swscanf_s(wszArgVal, L"%I64i", &argVal.Int64Val);
+						if (cConv != 1)
+						{
+							PrintError(L"arg '%s' requires int64. Got %s", wszArgVal);
+							hr = E_INVALIDARG;
+							goto exit;
+						}
+						break;
+					default:
+						assert(x_Args[iArg].Type == Arg_None);
+						break;
+					}
+					hr = x_Args[iArg].Callback(&argVal);
+					if (FAILED(hr))
+					{
+						goto exit;
+					}
+				}
+			}
+		}
+	}
+exit:
+	return hr;
+}
+
+int wmain(int argc, WCHAR** argv)
 {
 	WINSOCKERR err = 0;
+
+	HRESULT hr = S_OK;
+	
 	printf("tcptool version %d.%d\n", VER_MAJ, VER_MIN);
 	
 	err = InitWinsock();
@@ -124,6 +278,13 @@ int main()
 		goto exit;
 	}
 
+	hr = ProcessCommandLine(argc, argv);
+	if (FAILED(hr))
+	{
+		PrintError(L"ProcessCommandLine() failed: %x\n", hr);
+		goto exit;
+	}
+	
 	// Make a TCPv4 socket.
 	//
 	SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
@@ -141,5 +302,12 @@ int main()
 		goto exit;
 	}
 exit:
-	return err;
+	if (FAILED(hr))
+	{
+		return hr;
+	}
+	else
+	{
+		return err;
+	}
 }
