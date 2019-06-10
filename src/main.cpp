@@ -22,6 +22,7 @@
 #endif
 
 #define STRING_AND_CCH(x) x, _countof(x)
+#define INVALID_SWITCH_VALUE assert(!"Invalid switch")
 
 static const int x_MaxAddr = 128;
 
@@ -33,9 +34,9 @@ struct TcpToolOpts
 	//
 	WCHAR ConnectAddr[x_MaxAddr];
 
-	// Only applicable for server.
+	// Either connect target or listen port.
 	//
-	short ListenPort;
+	short Port;
 };
 
 TcpToolOpts g_Opts;
@@ -293,6 +294,45 @@ int wmain(int argc, WCHAR** argv)
 		err = WSAGetLastError();
 		PrintError(L"socket() failed: %d\n", err);
 		goto exit;
+	}
+
+	if (g_Opts.ConnectAddr[0])
+	{
+		sockaddr_in addr;
+		addr.sin_family = AF_INET;
+
+		// Parse the connect addr.
+		//
+		err = InetPtonW(AF_INET, g_Opts.ConnectAddr, &addr.sin_addr.s_addr);
+		switch (err)
+		{
+			case 1:
+				// Success.
+				//
+				break;
+			case 0:
+				PrintError(L"invalid IPv4 address: %s\n", g_Opts.ConnectAddr);
+				hr = E_INVALIDARG;
+				goto exit;
+				break;
+			case -1:
+				err = WSAGetLastError();
+				PrintError(L"InetPtonW() failed: %d\n", err);
+				goto exit;
+				break;
+			default:
+				INVALID_SWITCH_VALUE;
+				break;
+		}
+
+		addr.sin_port = htons(g_Opts.Port);
+		err = connect(s, (SOCKADDR*)&addr, sizeof (addr));
+		if (err)
+		{
+			err = WSAGetLastError();
+			PrintError(L"connect() failed: %d\n", err);
+			goto exit;
+		}
 	}
 
 	err = DumpSockOpts(s);
