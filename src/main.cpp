@@ -80,28 +80,11 @@ exit:
 	return err;
 }
 
-int main()
+WINSOCKERR
+DumpSockOpts(
+	_In_ SOCKET s)
 {
 	WINSOCKERR err = 0;
-	printf("tcptool version %d.%d\n", VER_MAJ, VER_MIN);
-	
-	err = InitWinsock();
-	if (err)
-	{
-		PrintError(L"InitWinsock failed: %d\n", err);
-		goto exit;
-	}
-
-	// Make a TCPv4 socket.
-	//
-	SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
-	if (s == INVALID_SOCKET)
-	{
-		err = WSAGetLastError();
-		PrintError(L"socket() failed: %d\n", err);
-		goto exit;
-	}
-
 	int RcvBufSize = 0;
 	int cbRcvBuf = sizeof(cbRcvBuf);
 	err = getsockopt(s, SOL_SOCKET, SO_RCVBUF, (char*)&RcvBufSize, &cbRcvBuf);
@@ -125,6 +108,38 @@ int main()
 	printf("sock opts:\n");
 	printf(" SO_RCVBUF: %d\n", RcvBufSize);
 	printf(" SO_SNDBUF: %d\n", SndBufSize);
+exit:
+	return err;
+}
+
+int main()
+{
+	WINSOCKERR err = 0;
+	printf("tcptool version %d.%d\n", VER_MAJ, VER_MIN);
+	
+	err = InitWinsock();
+	if (err)
+	{
+		PrintError(L"InitWinsock() failed: %d\n", err);
+		goto exit;
+	}
+
+	// Make a TCPv4 socket.
+	//
+	SOCKET s = socket(AF_INET, SOCK_STREAM, IPPROTO_TCP);
+	if (s == INVALID_SOCKET)
+	{
+		err = WSAGetLastError();
+		PrintError(L"socket() failed: %d\n", err);
+		goto exit;
+	}
+
+	err = DumpSockOpts(s);
+	if (err)
+	{
+		PrintError(L"DumpSockOpts() failed: %d\n", err);
+		goto exit;
+	}
 exit:
 	return err;
 }
