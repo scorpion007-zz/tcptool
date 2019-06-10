@@ -11,6 +11,7 @@
 #include <windows.h>
 #include <assert.h>
 #include <strsafe.h>
+#include <conio.h>
 
 #define VER_MAJ 1
 #define VER_MIN 0
@@ -135,6 +136,88 @@ exit:
 	return err;
 }
 
+_Check_return_ HRESULT
+ConnectSocket(
+	_In_ SOCKET s,
+	_In_ PCWSTR connectAddr,
+	short port)
+{
+	HRESULT hr = S_OK;
+	WINSOCKERR err = 0;
+	sockaddr_in addr;
+	addr.sin_family = AF_INET;
+	
+	// Parse the connect addr.
+	//
+	err = InetPton(AF_INET, connectAddr, &addr.sin_addr.s_addr);
+	switch (err)
+	{
+		case 1:
+			// Success.
+			//
+			break;
+		case 0:
+			PrintError(L"invalid IPv4 address: %s\n", connectAddr);
+			hr = E_INVALIDARG;
+			goto exit;
+			break;
+		case -1:
+			err = WSAGetLastError();
+			PrintError(L"InetPton() failed: %d\n", err);
+			hr = E_FAIL;
+			goto exit;
+			break;
+		default:
+			INVALID_SWITCH_VALUE;
+			break;
+	}
+	
+	addr.sin_port = htons(port);
+	err = connect(s, (SOCKADDR*)&addr, sizeof (addr));
+	if (err)
+	{
+		err = WSAGetLastError();
+		hr = E_FAIL;
+		PrintError(L"connect() failed: %d\n", err);
+		goto exit;
+	}
+exit:
+	return hr;
+}
+
+_Check_return_ HRESULT
+ListenSocket(
+	_In_ SOCKET s,
+	short port)
+{
+	HRESULT hr = S_OK;
+	WINSOCKERR err = 0;
+	sockaddr_in addr;
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(port);
+	addr.sin_addr.s_addr = INADDR_ANY;
+
+	err = bind(s, (SOCKADDR*)&addr, sizeof (addr));
+	if (err == SOCKET_ERROR)
+	{
+		err = WSAGetLastError();
+		hr = E_FAIL;
+		PrintError(L"bind() failed: %d\n", err);
+		goto exit;
+	}
+	
+	err = listen(s, SOMAXCONN);
+	if (err == SOCKET_ERROR)
+	{
+		err = WSAGetLastError();
+		hr = E_FAIL;
+		PrintError(L"listen() failed: %d\n", err);
+		goto exit;
+	}
+exit:
+	return hr;
+}
+
 // TODO: factor out to common lib.
 //
 enum ArgType
@@ -179,9 +262,19 @@ hdlConnect(_In_ const ArgVal* val)
 	return S_OK;
 }
 
+// Handle -port.
+//
+static _Check_return_ HRESULT
+hdlPort(_In_ const ArgVal* val)
+{
+	g_Opts.Port = (short)val->IntVal;
+	return S_OK;
+}
+
 static const Arg x_Args[] =
 {
 	{L"connect", L"c", Arg_String, hdlConnect},
+	{L"port", L"p", Arg_Int, hdlPort},
 };
 
 _Check_return_ HRESULT
@@ -212,7 +305,7 @@ ProcessCommandLine(int argc, WCHAR** argv)
 						{
 							// Not enough args.
 							//
-							PrintError(L"arg '%s' requires param", arg);
+							PrintError(L"arg '%s' requires param\n", arg);
 							hr = E_INVALIDARG;
 							goto exit;
 						}
@@ -233,7 +326,7 @@ ProcessCommandLine(int argc, WCHAR** argv)
 						cConv = swscanf_s(wszArgVal, L"%i", &argVal.IntVal);
 						if (cConv != 1)
 						{
-							PrintError(L"arg '%s' requires int. Got %s", wszArgVal);
+							PrintError(L"arg '%s' requires int. Got %s\n", wszArgVal);
 							hr = E_INVALIDARG;
 							goto exit;
 						}
@@ -242,7 +335,7 @@ ProcessCommandLine(int argc, WCHAR** argv)
 						cConv = swscanf_s(wszArgVal, L"%I64i", &argVal.Int64Val);
 						if (cConv != 1)
 						{
-							PrintError(L"arg '%s' requires int64. Got %s", wszArgVal);
+							PrintError(L"arg '%s' requires int64. Got %s\n", wszArgVal);
 							hr = E_INVALIDARG;
 							goto exit;
 						}
@@ -298,41 +391,32 @@ int wmain(int argc, WCHAR** argv)
 
 	if (g_Opts.ConnectAddr[0])
 	{
-		sockaddr_in addr;
-		addr.sin_family = AF_INET;
-
-		// Parse the connect addr.
-		//
-		err = InetPtonW(AF_INET, g_Opts.ConnectAddr, &addr.sin_addr.s_addr);
-		switch (err)
+		hr = ConnectSocket(s, g_Opts.ConnectAddr, g_Opts.Port);
+		if (FAILED(hr))
 		{
-			case 1:
-				// Success.
-				//
-				break;
-			case 0:
-				PrintError(L"invalid IPv4 address: %s\n", g_Opts.ConnectAddr);
-				hr = E_INVALIDARG;
-				goto exit;
-				break;
-			case -1:
-				err = WSAGetLastError();
-				PrintError(L"InetPtonW() failed: %d\n", err);
-				goto exit;
-				break;
-			default:
-				INVALID_SWITCH_VALUE;
-				break;
-		}
-
-		addr.sin_port = htons(g_Opts.Port);
-		err = connect(s, (SOCKADDR*)&addr, sizeof (addr));
-		if (err)
-		{
-			err = WSAGetLastError();
-			PrintError(L"connect() failed: %d\n", err);
+			PrintError(L"ConnectSocket() failed: %x\n", hr);
 			goto exit;
 		}
+	}
+	else
+	{
+		if (!g_Opts.Port)
+		{
+			PrintError(L"port required to listen\n");
+			goto exit;
+		}
+
+		// Listen is assumed in absense of -connect.
+		//
+		hr = ListenSocket(s, g_Opts.Port);
+		if (FAILED(hr))
+		{
+			PrintError(L"ListenSocket() failed: %x\n", hr);
+			goto exit;
+		}
+
+		printf("listening on port %d. Press any key to terminate.\n", g_Opts.Port);
+		_getch();
 	}
 
 	err = DumpSockOpts(s);
