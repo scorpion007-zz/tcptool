@@ -17,7 +17,7 @@ set (LIBS )
 
 source_group("Headers" FILES ${HEADERS})
 
-add_executable(jasperchess WIN32 ${SOURCES} ${HEADERS})
+add_executable(jasperchess ${SOURCES} ${HEADERS})
 target_link_libraries (jasperchess ${LIBS})
 
 # Subprojects
