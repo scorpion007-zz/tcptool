@@ -6,6 +6,7 @@
 #include <winsock2.h>
 #include <mswsock.h>
 #include <ws2tcpip.h>
+#include <mstcpip.h>
 #include <stdio.h>
 #include <stdarg.h>
 #include <windows.h>
@@ -104,7 +105,7 @@ exit:
 	return err;
 }
 
-WINSOCKERR
+_Check_return_ WINSOCKERR
 DumpSockOpts(
 	_In_ SOCKET s)
 {
@@ -132,6 +133,68 @@ DumpSockOpts(
 	printf("sock opts:\n");
 	printf(" SO_RCVBUF: %d\n", RcvBufSize);
 	printf(" SO_SNDBUF: %d\n", SndBufSize);
+exit:
+	return err;
+}
+
+_Check_return_ WINSOCKERR
+DumpSockStats(_In_ SOCKET s)
+{
+	TCP_INFO_v0 tcpInfo;
+	DWORD cbReturned = 0;
+	DWORD ioctlVer = 0;
+	WINSOCKERR err = 0;
+
+	// Requires Windows Server version 1709
+	// https://docs.microsoft.com/en-us/windows-server/get-started/whats-new-in-windows-server-1709#networking
+	//
+	err = WSAIoctl(
+		s,
+		SIO_TCP_INFO,
+		&ioctlVer,
+		sizeof(ioctlVer),
+		&tcpInfo,
+		sizeof(tcpInfo),
+		&cbReturned,
+		nullptr /* lpvOverlapped */,
+		nullptr /* lpCompletionRoutine */);
+
+	if (SOCKET_ERROR == err)
+	{
+		err = WSAGetLastError();
+		if (WSAEOPNOTSUPP == err)
+		{
+			// OS does not support this IOCTL. Win2019+.
+			//
+			err = 0;
+		}
+		else
+		{
+			PrintError(L"WSAIoctl(SIO_TCP_INFO) failed: %d\n", err);
+		}
+		goto exit;
+	}
+
+	printf("TCP_INFO_v0:\n");
+	printf("State: %d\n", tcpInfo.State);
+	printf("Mss: %u\n", tcpInfo.Mss);
+	printf("ConnectionTimeMs: %I64u\n", tcpInfo.ConnectionTimeMs);
+	printf("TimestampsEnabled: %d\n", tcpInfo.TimestampsEnabled);
+	printf("RttUs: %u\n", tcpInfo.RttUs);
+	printf("MinRttUs: %u\n", tcpInfo.MinRttUs);
+	printf("BytesInFlight: %u\n", tcpInfo.BytesInFlight);
+	printf("Cwnd: %u\n", tcpInfo.Cwnd);
+	printf("SndWnd: %u\n", tcpInfo.SndWnd);
+	printf("RcvWnd: %u\n", tcpInfo.RcvWnd);
+	printf("RcvBuf: %u\n", tcpInfo.RcvBuf);
+	printf("BytesOut: %I64u\n", tcpInfo.BytesOut);
+	printf("BytesIn: %I64u\n", tcpInfo.BytesIn);
+	printf("BytesReordered: %u\n", tcpInfo.BytesReordered);
+	printf("BytesRetrans: %u\n", tcpInfo.BytesRetrans);
+	printf("FastRetrans: %u\n", tcpInfo.FastRetrans);
+	printf("DupAcksIn: %u\n", tcpInfo.DupAcksIn);
+	printf("SynRetrans: %d\n", tcpInfo.SynRetrans);
+
 exit:
 	return err;
 }
@@ -419,6 +482,13 @@ int wmain(int argc, WCHAR** argv)
 				PrintError(L"send() failed: %d\n", err);
 				goto exit;
 			}
+			
+			err = DumpSockStats(s);
+			if (err)
+			{
+				PrintError(L"DumpSockStats() failed: %d\n", err);
+				goto exit;
+			}
 		}
 	}
 	else
@@ -464,6 +534,12 @@ int wmain(int argc, WCHAR** argv)
 			{
 				err = WSAGetLastError();
 				PrintError(L"recv() failed: %d\n", err);
+				goto exit;
+			}
+			err = DumpSockStats(s);
+			if (err)
+			{
+				PrintError(L"DumpSockStats() failed: %d\n", err);
 				goto exit;
 			}
 		}
