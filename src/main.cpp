@@ -359,6 +359,8 @@ exit:
 
 int wmain(int argc, WCHAR** argv)
 {
+	char buf[128];
+	
 	WINSOCKERR err = 0;
 
 	HRESULT hr = S_OK;
@@ -397,6 +399,27 @@ int wmain(int argc, WCHAR** argv)
 			PrintError(L"ConnectSocket() failed: %x\n", hr);
 			goto exit;
 		}
+
+		while (true)
+		{
+			printf("press any key to post a send\n");
+			int ch = _getch();
+			// printf("got %d (%c)\n", ch, ch);
+			static const int x_ETX = 3;  // ASCII End-Of-Text (CTRL-C).
+			if (ch == x_ETX)
+			{
+				printf("got CTRL-C, exiting.\n");
+				break;
+			}
+			
+			int ret = send(s, buf, sizeof(buf), 0);
+			if (ret == SOCKET_ERROR)
+			{
+				err = WSAGetLastError();
+				PrintError(L"send() failed: %d\n", err);
+				goto exit;
+			}
+		}
 	}
 	else
 	{
@@ -415,8 +438,35 @@ int wmain(int argc, WCHAR** argv)
 			goto exit;
 		}
 
-		printf("listening on port %d. Press any key to terminate.\n", g_Opts.Port);
-		_getch();
+		printf("listening on port %d. Waiting for client.\n", g_Opts.Port);
+		SOCKET acceptSoc = accept(s, nullptr, nullptr);
+		if (acceptSoc == INVALID_SOCKET)
+		{
+			err = WSAGetLastError();
+			PrintError(L"accept() failed: %d\n", err);
+			goto exit;
+		}
+		
+		printf("client connected.\n");
+
+		while (true)
+		{
+			printf("posting one recv.\n");
+			int ret = recv(acceptSoc, buf, sizeof(buf), 0);
+			if (!ret)
+			{
+				// conn was gracefully closed.
+				//
+				break;
+			}
+
+			if (ret == SOCKET_ERROR)
+			{
+				err = WSAGetLastError();
+				PrintError(L"recv() failed: %d\n", err);
+				goto exit;
+			}
+		}
 	}
 
 	err = DumpSockOpts(s);
