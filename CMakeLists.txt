@@ -13,12 +13,12 @@ set (SOURCES
 set (HEADERS
 	)
 
-set (LIBS )
+set (LIBS ws2_32)
 
 source_group("Headers" FILES ${HEADERS})
 
-add_executable(jasperchess ${SOURCES} ${HEADERS})
-target_link_libraries (jasperchess ${LIBS})
+add_executable(tcptool ${SOURCES} ${HEADERS})
+target_link_libraries (tcptool ${LIBS})
 
 # Subprojects
 #
