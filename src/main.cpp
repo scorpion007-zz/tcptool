@@ -101,6 +101,30 @@ int main()
 		PrintError(L"socket() failed: %d\n", err);
 		goto exit;
 	}
+
+	int RcvBufSize = 0;
+	int cbRcvBuf = sizeof(cbRcvBuf);
+	err = getsockopt(s, SOL_SOCKET, SO_RCVBUF, (char*)&RcvBufSize, &cbRcvBuf);
+	if (err)
+	{
+		err = WSAGetLastError();
+		PrintError(L"getsockopt() failed: %d\n", err);
+		goto exit;
+	}
+	
+	int SndBufSize = 0;
+	int cbSndBuf = sizeof(cbRcvBuf);
+	err = getsockopt(s, SOL_SOCKET, SO_SNDBUF, (char*)&SndBufSize, &cbSndBuf);
+	if (err)
+	{
+		err = WSAGetLastError();
+		PrintError(L"getsockopt() failed: %d\n", err);
+		goto exit;
+	}
+
+	printf("sock opts:\n");
+	printf(" SO_RCVBUF: %d\n", RcvBufSize);
+	printf(" SO_SNDBUF: %d\n", SndBufSize);
 exit:
 	return err;
 }
